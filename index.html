@@ -109,6 +109,11 @@
             border-radius: 8px;
             display: none;
             text-align: center;
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 2000;
         }
     </style>
 </head>
@@ -155,11 +160,9 @@
 
 <script>
     /** * --- CONFIGURATION ---
-     * 1. Deploy your Apps Script as a Web App (Execute as: Me, Access: Anyone).
-     * 2. Copy the URL and paste it between the quotes below.
-     * 3. Example: "https://script.google.com/macros/s/AKfycbz.../exec"
+     * Script URL provided by user.
      */
-    const SCRIPT_URL = ""; 
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzffuUxlESjy87_9LWrrN6Wnu8-m2wIWTIOvkDkMe3l7MORcFL93Qj-Nbp2SapzkQqz/exec"; 
 
     const canvas = document.getElementById('squadCanvas');
     const ctx = canvas.getContext('2d');
@@ -196,8 +199,8 @@
     }
 
     async function loadTeamData() {
-        if (!SCRIPT_URL || SCRIPT_URL === "YOUR_DEPLOYED_WEB_APP_URL") {
-            showError("Configuration Missing: Please paste your Google Apps Script Web App URL into the SCRIPT_URL variable in the code.");
+        if (!SCRIPT_URL) {
+            showError("Configuration Missing: Script URL is required.");
             drawStaticBackground();
             return;
         }
@@ -220,12 +223,7 @@
             currentData = await response.json();
             
             for (const z of zones) {
-                ctx.strokeStyle = z.type === 'player' ? '#39ff14' : '#00f2ff';
-                ctx.lineWidth = 2;
-                
                 if(z.type === 'player') {
-                    ctx.strokeRect(z.x, z.y, z.w, z.h);
-                    
                     // Create input field
                     const input = document.createElement('input');
                     input.className = 'player-input';
@@ -234,13 +232,13 @@
                     input.style.left = (z.x + z.w/2) / 1200 * 100 + "%";
                     input.style.top = (z.y + z.h + 8) / 675 * 100 + "%";
                     
-                    // Handle name changes
                     input.onblur = async (e) => {
                         const newName = e.target.value;
-                        if (currentData[`P${z.id}_Name`] !== newName) {
+                        if (!currentData || currentData[`P${z.id}_Name`] !== newName) {
+                            if (!currentData) currentData = {};
                             await sendData(z.type, z.id, newName, null);
                             currentData[`P${z.id}_Name`] = newName;
-                            refreshCanvas(); // Redraw text onto canvas
+                            refreshCanvas();
                         }
                     };
                     ui.appendChild(input);
@@ -249,7 +247,6 @@
                         await drawImgAsync(currentData[`P${z.id}_URL`], z);
                     }
                 } else {
-                    ctx.beginPath(); ctx.arc(z.x + z.w/2, z.y + z.h/2, z.w/2, 0, Math.PI*2); ctx.stroke();
                     if(currentData && currentData["LogoURL"]) {
                         await drawImgAsync(currentData["LogoURL"], z);
                     }
@@ -258,31 +255,43 @@
             refreshCanvas();
         } catch (e) {
             console.error(e);
-            showError("Network Error: Could not connect to the database. Ensure SCRIPT_URL is correct and Web App is deployed.");
+            showError("Network Error: Make sure your Script is deployed as a Web App for 'Anyone'.");
         } finally {
             loading.style.display = 'none';
         }
     }
 
     function drawStaticBackground() {
+        // Background
         ctx.fillStyle = '#060b14';
         ctx.fillRect(0,0,1200,675);
         
-        // Decorative lines
+        // Outer decorative lines
         ctx.strokeStyle = '#00f2ff'; ctx.lineWidth = 3;
         ctx.strokeRect(20, 20, 1160, 635);
         ctx.strokeStyle = 'rgba(57, 255, 20, 0.3)'; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(0, 450); ctx.lineTo(1200, 450); ctx.stroke();
         
+        // Draw Placeholder Borders
+        zones.forEach(z => {
+            ctx.strokeStyle = z.type === 'player' ? '#39ff14' : '#00f2ff';
+            ctx.lineWidth = 2;
+            if (z.type === 'player') {
+                ctx.strokeRect(z.x, z.y, z.w, z.h);
+            } else {
+                ctx.beginPath(); 
+                ctx.arc(z.x + z.w/2, z.y + z.h/2, z.w/2, 0, Math.PI * 2); 
+                ctx.stroke();
+            }
+        });
+
         ctx.fillStyle = '#00f2ff'; ctx.font = "bold 24px Segoe UI"; ctx.textAlign = "center";
         ctx.fillText("SQUAD OVERVIEW", 1000, 60);
     }
 
-    // Refresh the whole canvas and draw labels
     function refreshCanvas() {
-        // Redraw labels or specialized text if needed
         zones.forEach(z => {
-            if (z.type === 'player') {
+            if (z.type === 'player' && currentData) {
                 const name = currentData[`P${z.id}_Name`];
                 if (name) {
                     ctx.fillStyle = "rgba(0,0,0,0.6)";
@@ -301,7 +310,7 @@
         try {
             await fetch(SCRIPT_URL, {
                 method: 'POST',
-                mode: 'no-cors', // Apps script redirects often require no-cors for simple posts
+                mode: 'no-cors',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ team: currentTeam, type, index, val, base64 })
             });
@@ -349,7 +358,7 @@
         if (!file) return;
         
         loading.style.display = 'flex';
-        loadingDetails.innerText = `Optimizing image for ${activeZone.id}...`;
+        loadingDetails.innerText = `Updating ${activeZone.id}...`;
         
         const reader = new FileReader();
         reader.onload = async (ev) => {
@@ -362,20 +371,17 @@
     };
 
     function downloadImage() {
-        // Ensure all inputs are "printed" onto the canvas before download
         const tempCanvas = document.createElement('canvas');
         tempCanvas.width = 1200;
         tempCanvas.height = 675;
         const tCtx = tempCanvas.getContext('2d');
         tCtx.drawImage(canvas, 0, 0);
         
-        // Draw the current team name onto the image
         tCtx.fillStyle = '#00f2ff';
         tCtx.font = "bold 40px Segoe UI";
         tCtx.textAlign = "center";
         tCtx.fillText(currentTeam.toUpperCase(), 600, 60);
 
-        // Draw names from inputs onto the final image
         const inputs = document.querySelectorAll('.player-input');
         inputs.forEach((input, i) => {
             const z = zones[i];
@@ -398,12 +404,10 @@
 
     teamSelect.onchange = loadTeamData;
     
-    // Auto-init
+    // Always draw background on start
+    drawStaticBackground();
     if (SCRIPT_URL) {
         loadTeamData();
-    } else {
-        drawStaticBackground();
-        showError("Setup Required: Please paste your Apps Script URL into the code.");
     }
 </script>
 </body>
