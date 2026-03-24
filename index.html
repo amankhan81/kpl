@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cricket Squad Builder</title>
+    <style>
+        :root {
+            --neon-green: #39ff14;
+            --neon-blue: #00f2ff;
+            --bg-dark: #060b14;
+        }
+        body {
+            background-color: var(--bg-dark);
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+        header {
+            background: linear-gradient(90deg, #112240, #0a192f);
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid var(--neon-blue);
+            box-shadow: 0 0 15px var(--neon-blue);
+        }
+        .team-title {
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--neon-blue);
+            text-shadow: 0 0 10px var(--neon-blue);
+            margin: 0;
+        }
+        #stage {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            background: radial-gradient(circle at center, #1a2a4a 0%, #060b14 100%);
+        }
+        #canvas-wrapper {
+            position: relative;
+            box-shadow: 0 0 50px rgba(0, 242, 255, 0.2);
+        }
+        canvas {
+            display: block;
+            max-height: 80vh;
+            max-width: 95vw;
+            background: #000;
+        }
+        .ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        .player-input {
+            position: absolute;
+            width: 80px;
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid var(--neon-green);
+            color: var(--neon-green);
+            font-size: 10px;
+            text-align: center;
+            pointer-events: auto;
+            transform: translateX(-50%);
+            border-radius: 4px;
+        }
+        .btn-container {
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            cursor: pointer;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            font-weight: bold;
+            transition: 0.3s;
+        }
+        .btn-dl { background-color: var(--neon-blue); color: #000; }
+        .btn-dl:hover { background-color: white; box-shadow: 0 0 20px var(--neon-blue); }
+        
+        #loading {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            font-size: 20px;
+            color: var(--neon-blue);
+        }
+        .error-msg {
+            background: #ff4444;
+            color: white;
+            padding: 20px;
+            margin: 10px;
+            border-radius: 8px;
+            display: none;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<div id="loading">
+    <div style="margin-bottom: 20px;">Processing Squad Data...</div>
+    <div id="loading-details" style="font-size: 14px; opacity: 0.8;"></div>
+</div>
+
+<div id="error-bar" class="error-msg"></div>
+
+<header>
+    <div style="display:flex; gap:10px;">
+        <select id="teamSelect" style="padding:10px; border-radius:5px; background:#112240; color:white; border:1px solid var(--neon-blue);">
+            <option value="Pak Eagles">Pak Eagles</option>
+            <option value="Khanjee">Khanjee</option>
+            <option value="Saudi German">Saudi German</option>
+            <option value="RSCC">RSCC</option>
+            <option value="Riyadh Stallions">Riyadh Stallions</option>
+            <option value="Riyadh Kings">Riyadh Kings</option>
+            <option value="Punjab XI">Punjab XI</option>
+            <option value="Swat XI">Swat XI</option>
+            <option value="Kabza Group">Kabza Group</option>
+            <option value="RCC">RCC</option>
+            <option value="Kaptan XI">Kaptan XI</option>
+            <option value="Gladiators YB">Gladiators YB</option>
+        </select>
+    </div>
+    <h1 class="team-title" id="displayTitle">SQUAD BUILDER</h1>
+    <div class="btn-container">
+        <button class="btn-dl" onclick="downloadImage()">DOWNLOAD PNG</button>
+    </div>
+</header>
+
+<div id="stage">
+    <div id="canvas-wrapper">
+        <canvas id="squadCanvas" width="1200" height="675"></canvas>
+        <div id="ui-layer" class="ui-overlay"></div>
+    </div>
+</div>
+
+<input type="file" id="fileInput" style="display:none" accept="image/*">
+
+<script>
+    /** * --- CONFIGURATION ---
+     * 1. Deploy your Apps Script as a Web App (Execute as: Me, Access: Anyone).
+     * 2. Copy the URL and paste it between the quotes below.
+     * 3. Example: "https://script.google.com/macros/s/AKfycbz.../exec"
+     */
+    const SCRIPT_URL = ""; 
+
+    const canvas = document.getElementById('squadCanvas');
+    const ctx = canvas.getContext('2d');
+    const ui = document.getElementById('ui-layer');
+    const fileInput = document.getElementById('fileInput');
+    const teamSelect = document.getElementById('teamSelect');
+    const loading = document.getElementById('loading');
+    const loadingDetails = document.getElementById('loading-details');
+    const errorBar = document.getElementById('error-bar');
+    
+    let currentTeam = teamSelect.value;
+    let activeZone = null;
+    let currentData = {};
+    const zones = [];
+
+    // Layout configuration for 18 players
+    for(let i=0; i<18; i++) {
+        zones.push({
+            id: i+1,
+            x: 60 + (i % 6) * 110,
+            y: 140 + Math.floor(i / 6) * 165,
+            w: 90,
+            h: 120,
+            type: 'player'
+        });
+    }
+    // Logo Zone
+    zones.push({ id: 'logo', x: 780, y: 160, w: 350, h: 350, type: 'logo' });
+
+    function showError(msg) {
+        errorBar.innerText = msg;
+        errorBar.style.display = 'block';
+        setTimeout(() => { errorBar.style.display = 'none'; }, 8000);
+    }
+
+    async function loadTeamData() {
+        if (!SCRIPT_URL || SCRIPT_URL === "YOUR_DEPLOYED_WEB_APP_URL") {
+            showError("Configuration Missing: Please paste your Google Apps Script Web App URL into the SCRIPT_URL variable in the code.");
+            drawStaticBackground();
+            return;
+        }
+
+        loading.style.display = 'flex';
+        loadingDetails.innerText = `Fetching ${currentTeam} data...`;
+        ui.innerHTML = '';
+        currentTeam = teamSelect.value;
+        document.getElementById('displayTitle').innerText = currentTeam.toUpperCase();
+        
+        drawStaticBackground();
+
+        try {
+            const url = new URL(SCRIPT_URL);
+            url.searchParams.append('team', currentTeam);
+            
+            const response = await fetch(url.toString());
+            if (!response.ok) throw new Error("Server responded with error");
+            
+            currentData = await response.json();
+            
+            for (const z of zones) {
+                ctx.strokeStyle = z.type === 'player' ? '#39ff14' : '#00f2ff';
+                ctx.lineWidth = 2;
+                
+                if(z.type === 'player') {
+                    ctx.strokeRect(z.x, z.y, z.w, z.h);
+                    
+                    // Create input field
+                    const input = document.createElement('input');
+                    input.className = 'player-input';
+                    input.value = currentData ? (currentData[`P${z.id}_Name`] || "") : "";
+                    input.placeholder = "NAME";
+                    input.style.left = (z.x + z.w/2) / 1200 * 100 + "%";
+                    input.style.top = (z.y + z.h + 8) / 675 * 100 + "%";
+                    
+                    // Handle name changes
+                    input.onblur = async (e) => {
+                        const newName = e.target.value;
+                        if (currentData[`P${z.id}_Name`] !== newName) {
+                            await sendData(z.type, z.id, newName, null);
+                            currentData[`P${z.id}_Name`] = newName;
+                            refreshCanvas(); // Redraw text onto canvas
+                        }
+                    };
+                    ui.appendChild(input);
+
+                    if(currentData && currentData[`P${z.id}_URL`]) {
+                        await drawImgAsync(currentData[`P${z.id}_URL`], z);
+                    }
+                } else {
+                    ctx.beginPath(); ctx.arc(z.x + z.w/2, z.y + z.h/2, z.w/2, 0, Math.PI*2); ctx.stroke();
+                    if(currentData && currentData["LogoURL"]) {
+                        await drawImgAsync(currentData["LogoURL"], z);
+                    }
+                }
+            }
+            refreshCanvas();
+        } catch (e) {
+            console.error(e);
+            showError("Network Error: Could not connect to the database. Ensure SCRIPT_URL is correct and Web App is deployed.");
+        } finally {
+            loading.style.display = 'none';
+        }
+    }
+
+    function drawStaticBackground() {
+        ctx.fillStyle = '#060b14';
+        ctx.fillRect(0,0,1200,675);
+        
+        // Decorative lines
+        ctx.strokeStyle = '#00f2ff'; ctx.lineWidth = 3;
+        ctx.strokeRect(20, 20, 1160, 635);
+        ctx.strokeStyle = 'rgba(57, 255, 20, 0.3)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, 450); ctx.lineTo(1200, 450); ctx.stroke();
+        
+        ctx.fillStyle = '#00f2ff'; ctx.font = "bold 24px Segoe UI"; ctx.textAlign = "center";
+        ctx.fillText("SQUAD OVERVIEW", 1000, 60);
+    }
+
+    // Refresh the whole canvas and draw labels
+    function refreshCanvas() {
+        // Redraw labels or specialized text if needed
+        zones.forEach(z => {
+            if (z.type === 'player') {
+                const name = currentData[`P${z.id}_Name`];
+                if (name) {
+                    ctx.fillStyle = "rgba(0,0,0,0.6)";
+                    ctx.fillRect(z.x, z.y + z.h - 20, z.w, 20);
+                    ctx.fillStyle = "#39ff14";
+                    ctx.font = "10px Segoe UI";
+                    ctx.textAlign = "center";
+                    ctx.fillText(name.toUpperCase(), z.x + z.w/2, z.y + z.h - 7);
+                }
+            }
+        });
+    }
+
+    async function sendData(type, index, val, base64) {
+        if (!SCRIPT_URL) return;
+        try {
+            await fetch(SCRIPT_URL, {
+                method: 'POST',
+                mode: 'no-cors', // Apps script redirects often require no-cors for simple posts
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ team: currentTeam, type, index, val, base64 })
+            });
+        } catch (err) {
+            console.error("Save failed:", err);
+        }
+    }
+
+    function drawImgAsync(src, z) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.onload = () => {
+                ctx.save();
+                if(z.type === 'logo') {
+                    ctx.beginPath(); ctx.arc(z.x + z.w/2, z.y + z.h/2, z.w/2, 0, Math.PI*2); ctx.clip();
+                } else {
+                    ctx.beginPath(); ctx.rect(z.x, z.y, z.w, z.h); ctx.clip();
+                }
+                
+                let iR = img.width/img.height, zR = z.w/z.h;
+                let dW, dH, dX, dY;
+                if(iR > zR) { dH=z.h; dW=img.width*(z.h/img.height); dX=z.x-(dW-z.w)/2; dY=z.y; }
+                else { dW=z.w; dH=img.height*(z.w/img.width); dX=z.x; dY=z.y-(dH-z.h)/2; }
+                
+                ctx.drawImage(img, dX, dY, dW, dH);
+                ctx.restore();
+                resolve();
+            };
+            img.onerror = () => resolve();
+            img.src = src;
+        });
+    }
+
+    canvas.onclick = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left) * (1200 / rect.width);
+        const y = (e.clientY - rect.top) * (675 / rect.height);
+        activeZone = zones.find(z => x > z.x && x < z.x+z.w && y > z.y && y < z.y+z.h);
+        if(activeZone) fileInput.click();
+    };
+
+    fileInput.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        loading.style.display = 'flex';
+        loadingDetails.innerText = `Optimizing image for ${activeZone.id}...`;
+        
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+            const base64 = ev.target.result;
+            await drawImgAsync(base64, activeZone);
+            await sendData(activeZone.type, activeZone.id, null, base64);
+            loading.style.display = 'none';
+        };
+        reader.readAsDataURL(file);
+    };
+
+    function downloadImage() {
+        // Ensure all inputs are "printed" onto the canvas before download
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = 1200;
+        tempCanvas.height = 675;
+        const tCtx = tempCanvas.getContext('2d');
+        tCtx.drawImage(canvas, 0, 0);
+        
+        // Draw the current team name onto the image
+        tCtx.fillStyle = '#00f2ff';
+        tCtx.font = "bold 40px Segoe UI";
+        tCtx.textAlign = "center";
+        tCtx.fillText(currentTeam.toUpperCase(), 600, 60);
+
+        // Draw names from inputs onto the final image
+        const inputs = document.querySelectorAll('.player-input');
+        inputs.forEach((input, i) => {
+            const z = zones[i];
+            const name = input.value;
+            if (name) {
+                tCtx.fillStyle = "rgba(0,0,0,0.8)";
+                tCtx.fillRect(z.x, z.y + z.h - 22, z.w, 22);
+                tCtx.fillStyle = "#39ff14";
+                tCtx.font = "bold 12px Segoe UI";
+                tCtx.textAlign = "center";
+                tCtx.fillText(name.toUpperCase(), z.x + z.w/2, z.y + z.h - 6);
+            }
+        });
+
+        const link = document.createElement('a');
+        link.download = `${currentTeam.replace(/\s+/g, '_')}_Official_Squad.png`;
+        link.href = tempCanvas.toDataURL("image/png");
+        link.click();
+    }
+
+    teamSelect.onchange = loadTeamData;
+    
+    // Auto-init
+    if (SCRIPT_URL) {
+        loadTeamData();
+    } else {
+        drawStaticBackground();
+        showError("Setup Required: Please paste your Apps Script URL into the code.");
+    }
+</script>
+</body>
+</html>
